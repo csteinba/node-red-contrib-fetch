@@ -1,0 +1,10 @@
+node_modules
+.vscode
+.idea
+
+# macOS
+.DS_Store
+.AppleDouble/
+.LSOverride
+Icon\r
+__MACOSX/

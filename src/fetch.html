@@ -1,0 +1,400 @@
+<script type="text/javascript">
+    RED.nodes.registerType("fetch-endpoint", {
+        category: "config",
+        defaults: {
+            name: { value: "" },
+            baseURL: { value: "", required: true },
+            caCertPath: { value: "" },
+            rejectUnauthorized: { value: true },
+            apiKeyKey: {value: ""},
+            apiKeyAddTo: {value: "headers"},
+        },
+        credentials: {
+            username: { value: "", type: "text" },
+            password: { value: "", type: "password" },
+            apiKeyValue: { value: "", type: "text"}
+        },
+        color: "#79c5e6",
+        icon: "icons/node-red/white-globe.svg",
+        label: function () {
+            return this.name || this.baseURL;
+        },
+        oneditprepare: function () {
+
+            this.tabs = RED.tabs.create({
+                id: "tabs",
+                onchange: function (tab) {
+                    $("#tabs-content").children().hide();
+                    $("#" + tab.id).show();
+                },
+            });
+
+            this.tabs.addTab({
+                id: "tab-endpoint",
+                label: "Endpoint",
+            });
+
+            this.tabs.addTab({
+                id: "tab-tls",
+                label: "TLS",
+            });
+
+            this.tabs.activateTab("tab-endpoint");
+        },
+    });
+</script>
+
+<style>
+    .node-input-params-container-row .red-ui-editableList-container,
+    .node-input-headers-container-row .red-ui-editableList-container {
+        height: auto !important;
+    }
+</style>
+
+<script type="text/html" data-template-name="fetch-endpoint">
+    <div class="form-row">
+        <label for="node-config-input-name"
+            ><i class="fa fa-tag"></i> Name</label
+        >
+        <input type="text" id="node-config-input-name" />
+    </div>
+
+    <div class="form-row tabs-row">
+        <ul style="min-width: 600px; margin-bottom: 20px;" id="tabs"></ul>
+    </div>
+
+    <div id="tabs-content">
+        <div id="tab-endpoint" style="display:none">
+            <div class="form-row">
+                <label for="node-config-input-baseURL"
+                    ><i class="fa fa-star"></i> Base URL</label
+                >
+                <input
+                    type="text"
+                    id="node-config-input-baseURL"
+                    placeholder="https://some-domain.com/api"
+                />
+            </div>
+            <h4>Basic Authentication</h4>
+            <div class="form-row">
+                <label for="node-config-input-username">Username</label>
+                <input type="text" id="node-config-input-username" />
+            </div>
+            <div class="form-row">
+                <label for="node-config-input-password">Password</label>
+                <input type="password" id="node-config-input-password" />
+            </div>
+            <h4>API Key</h4>
+            <div class="form-row">
+                <label for="node-config-input-apiKeyKey">Key</label>
+                <input type="text" id="node-config-input-apiKeyKey" />
+            </div>
+            <div class="form-row">
+                <label for="node-config-input-apiKeyValue">Value</label>
+                <input type="text" id="node-config-input-apiKeyValue" />
+            </div>
+            <div class="form-row">
+                <label for="node-config-input-apiKeyAddTo">Add To</label>
+                <select id="node-config-input-apiKeyAddTo">
+                    <option value="headers">Header</option>
+                    <option value="params">Query Param</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="tab-tls" style="display:none">
+            <div class="form-row">
+                <label for="node-config-input-caCertPath" style="width: auto;"
+                    ><i class="fa fa-user"></i> CA Certificate</label
+                >
+                <input
+                    type="text"
+                    id="node-config-input-caCertPath"
+                    placeholder="path to ca certificate (PEM)"
+                />
+            </div>
+            <div class="form-row">
+                <input
+                    type="checkbox"
+                    id="node-config-input-rejectUnauthorized"
+                    style="display: inline-block; width: auto; vertical-align: top;"
+                />
+                <label
+                    for="node-config-input-rejectUnauthorized"
+                    style="width: auto;"
+                    >Verify server certificate</label
+                >
+            </div>
+        </div>
+    </div>
+</script>
+
+<!-- prettier-ignore -->
+<script type="text/markdown" data-help-name="fetch-endpoint">
+HTTP fetch API endpoint configuration node
+
+### Endpoint
+
+: BaseURL (string) : `baseURL` will be prepended to request node `url`.
+: Username (string) : Optional - Username for http basic authentication.
+: Password (string) : Optional - Password for http basic authentication.
+: API Key - Key (string) : Optional - Key for API key authentication.
+: API Key - Value (string) : Optional - Value for API key authentication. You can use flow or global variable with `{{global.myVar}}` or `{{flow.myVar}}`.
+: API Key - Add To (string) : Decide if you want to add the API key as http header or query param.
+
+### TLS
+
+: CA Certificate (path) : Add the path to your custom CA certificate.
+: Verify server certificate (bool) : TLS certificate verification.
+</script>
+
+<script type="text/javascript">
+    RED.nodes.registerType("fetch-request", {
+        category: "network-input",
+        defaults: {
+            name: { value: "" },
+            endpoint: { type: "fetch-endpoint", required: true },
+            method: { value: "get", required: true },
+            url: { value: "" },
+            headers: { value: [] },
+            params: { value: [] },
+            resBodyType: { value: "json" },
+            sendResHeaders: { value: false },
+            sendResStatus: { value: true },
+            validateStatus: { value: false },
+            keepAlive: { value: false },
+            timeout: { value: 30000, required: true }
+        },
+        inputs: 1,
+        outputs: 1,
+        color: "#79c5e6",
+        icon: "icons/node-red/white-globe.svg",
+        paletteLabel: "fetch",
+        oneditprepare: function() {
+            const node = this;
+            ['params', 'headers'].forEach(property => {
+                const plist = node[property] || [];
+                const list = $(`#node-input-${property}-container`)
+                .editableList({
+                    addItem: function (container, i, prop) {
+                        const row = $('<div/>').css({
+                            overflow: 'hidden',
+                            whiteSpace: 'nowrap',
+                            display: 'flex'
+                        }).appendTo(container);
+
+                        const propertyKeyCell = $('<div/>').css({ 'flex-grow': 1 }).appendTo(row);
+                        const propertyKeyValue = $('<input/>', {
+                            class: `node-input-${property}-name`,
+                            type: "text",
+                            style: "width: 100%",
+                            placeholder: "key"
+                            })
+                            .appendTo(propertyKeyCell)
+                            .typedInput({ types: ["str", "msg", "flow", "global"] });
+                        propertyKeyValue.typedInput('type', prop.keyType);
+                        propertyKeyValue.typedInput('value', prop.keyValue);
+
+                        const propertyValueCell = $('<div/>').css({ 'flex-grow': 1, 'margin-left': '10px' }).appendTo(row);
+                        const propertyValue = $('<input/>', {
+                            class: `node-input-${property}-value`,
+                            type: "text",
+                            style: "width: 100%",
+                            placeholder: "value"
+                            })
+                            .appendTo(propertyValueCell)
+                            .typedInput({ types: ["str", "msg", "flow", "global"] });
+                        propertyValue.typedInput('type', prop.valueType);
+                        propertyValue.typedInput('value', prop.valueValue);
+
+                    },
+                    sortable: true,
+                    removable: true
+                });
+                plist.forEach(prop => {
+                    list.editableList('addItem', prop);
+                });
+            });
+        },
+        oneditsave: function() {
+            ['params', 'headers'].forEach(property => {
+                const list = $(`#node-input-${property}-container`).editableList('items');
+                const node = this;
+                node[property] = [];
+                list.each(function(i) {
+                    const prop = $(this);
+                    const keyType = prop.find(`.node-input-${property}-name`).typedInput('type');
+                    const keyValue = prop.find(`.node-input-${property}-name`).typedInput('value');
+                    const valueType = prop.find(`.node-input-${property}-value`).typedInput('type');
+                    const valueValue = prop.find(`.node-input-${property}-value`).typedInput('value');
+                    node[property].push({
+                        keyType, keyValue, valueType, valueValue
+                    })
+                });
+            });
+        },
+        oneditresize: function(size) {
+            const dlg = $("#dialog-form");
+            ['params', 'headers'].forEach(property => {
+                const expandRow = dlg.find(`.node-input-${property}-container-row`);
+                let height = dlg.height() - 5;
+                if(expandRow && expandRow.length){
+                    const siblingRows = dlg.find(`> .form-row:not(.node-input-${property}-container-row)`);
+                    for (let i = 0; i < siblingRows.size(); i++) {
+                        const cr = $(siblingRows[i]);
+                        if(cr.is(":visible"))
+                            height -= cr.outerHeight(true);
+                    }
+                    $(`#node-input-${property}-container`).editableList('height',height);
+                }
+            });
+
+        },
+        label: function () {
+            return this.name || `[${this.method}] ${this.url}`;
+        },
+    });
+</script>
+
+<script type="text/html" data-template-name="fetch-request">
+    <div class="form-row">
+        <label for="node-input-endpoint">
+            <i class="fa fa-server"></i> Endpoint
+        </label>
+        <input type="text" id="node-input-endpoint" />
+    </div>
+    <div class="form-row">
+        <label for="node-input-method">
+            <i class="fa fa-envelope-o"></i> Method
+        </label>
+        <select id="node-input-method">
+            <option value="get">GET</option>
+            <option value="post">POST</option>
+            <option value="put">PUT</option>
+            <option value="delete">DELETE</option>
+            <option value="patch">PATCH</option>
+        </select>
+    </div>
+    <div class="form-row">
+        <label for="node-input-url">
+            <i class="fa fa-terminal"></i> URL
+        </label>
+        <input type="text" id="node-input-url" placeholder="/resource" />
+    </div>
+    <div class="form-row" style="margin-bottom:0;">
+        <label>
+            <i class="fa fa-list"></i> Params
+        </label>
+    </div>
+    <div class="form-row node-input-params-container-row">
+        <ol id="node-input-params-container"></ol>
+    </div>
+    <div class="form-row" style="margin-bottom:0;">
+        <label>
+            <i class="fa fa-list"></i> Headers
+        </label>
+    </div>
+    <div class="form-row node-input-headers-container-row">
+        <ol id="node-input-headers-container"></ol>
+    </div>
+    <div class="form-row">
+        <label for="node-input-resBodyType"
+            >Response Body</label
+        >
+        <select id="node-input-resBodyType">
+            <option value="json">JSON</option>
+            <option value="text">Text</option>
+            <option value="arraybuffer">Array Buffer</option>
+        </select>
+    </div>
+    <div class="form-row">
+        <input
+            type="checkbox"
+            id="node-input-sendResHeaders"
+            style="display: inline-block; width: auto; vertical-align: top;"
+        />
+        <label for="node-input-sendResHeaders" style="width: auto;"
+            >Return HTTP response headers</label
+        >
+    </div>
+    <div class="form-row">
+        <input
+            type="checkbox"
+            id="node-input-sendResStatus"
+            style="display: inline-block; width: auto; vertical-align: top;"
+        />
+        <label for="node-input-sendResStatus" style="width: auto;"
+            >Return HTTP response status code</label
+        >
+    </div>
+    <div class="form-row">
+        <input
+            type="checkbox"
+            id="node-input-validateStatus"
+            style="display: inline-block; width: auto; vertical-align: top;"
+        />
+        <label for="node-input-validateStatus" style="width: auto;"
+            >Throw error if HTTP response status code other than 2xx</label
+        >
+    </div>
+    <div class="form-row">
+        <input
+            type="checkbox"
+            id="node-input-keepAlive"
+            style="display: inline-block; width: auto; vertical-align: top;"
+        />
+        <label for="node-input-keepAlive" style="width: auto;"
+            >Connection keep-alive</label
+        >
+    </div>
+    <div class="form-row">
+        <label for="node-input-timeout"
+            ><i class="fa fa-clock-o"></i> Timeout</label
+        >
+        <input type="number" id="node-input-timeout" />
+        <span>ms</span>
+    </div>
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name" />
+    </div>
+</script>
+
+<!-- prettier-ignore -->
+<script type="text/markdown" data-help-name="fetch-request">
+HTTP fetch API node
+
+### Node Properties
+
+- **Endpoint** : Select a configured Endpoint node. The endpoint provides the `baseURL`, authentication (Basic/API key), TLS and certificate settings. Requests are made relative to the endpoint's `baseURL`.
+- **Method** : HTTP method to use for the request (GET, POST, PUT, PATCH, DELETE).
+- **URL** : Path or URL for the request. The path (e.g. `/resource`) is appended to the endpoint `baseURL`. If `msg.url` is set it overrides this value.
+- **Params** : List of query parameters to include with the request. Each entry is a key/value pair; values can be static or typed inputs (`str`, `msg`, `flow`, `global`).
+- **Headers** : List of HTTP headers to include with the request. Each entry is a key/value pair; values can be static or typed inputs (`str`, `msg`, `flow`, `global`).
+- **Response body type** : How to interpret the response body: `json` (parse JSON), `text` (string), or `arraybuffer` (raw binary buffer). The parsed value is put into `msg.payload`.
+- **Return HTTP response headers** : If enabled, response headers are provided on the output message as `msg.headers`.
+- **Return HTTP response status code** : If enabled, the HTTP status code is provided as `msg.statusCode` on the output message.
+- **Validate status** : When enabled, treat non-2xx HTTP responses as errors (the node will throw and mark the execution as failed).
+- **Connection keep-alive** : Reuse TCP connections between requests for better performance. Enables an HTTP agent with `keepAlive`.
+- **Timeout** : Maximum time in milliseconds to wait for a response before aborting the request.
+
+### Message Properties
+
+- **msg.payload (any)** : `msg.payload` is the data to be sent as the request body. Only applicable for request methods 'PUT', 'POST', 'DELETE', and 'PATCH'.
+- **msg.headers (object)** : `headers` are custom headers to be sent.
+- **msg.params (object)** : `params` are the URL parameters to be sent with the request.
+
+### Node Status
+
+Different status information is displayed below the node:
+
+#### Tags
+- **s** : Number of successful requests. HTTP 2xx status code.
+- **err** : Number of failed requests
+- **rt** : Last response runtime in ms
+
+#### Colors
+- **green** : Last fetch was successful
+- **blue** : Fetch in progress
+- **red** : Last fetch failed
+</script>

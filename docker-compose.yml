@@ -1,0 +1,14 @@
+services:
+  node-red:
+    image: nodered/node-red:latest
+    container_name: node-red-fetch
+    restart: unless-stopped
+    ports:
+      - 1880:1880
+    volumes:
+      - nodered-fetch-data:/data
+      - ./:/node-red-contrib-fetch
+
+volumes:
+  nodered-fetch-data:
+    name: nodered-fetch-data
