@@ -25,7 +25,7 @@ module.exports = function (RED) {
 
         node.name = config.name || `[${config.method}] ${config.url}`;
 
-        // get request endpoint
+        // Get request endpoint
         const endpoint = RED.nodes.getNode(config.endpoint);
 
         // http / https agent config
@@ -34,25 +34,26 @@ module.exports = function (RED) {
             rejectUnauthorized: endpoint.config.rejectUnauthorized,
         };
 
-        // read ca certificate file
+        // Read ca certificate file
         if (endpoint.config.caCertPath) {
             try {
                 agentConfig.ca = fs.readFileSync(endpoint.config.caCertPath);
             } catch (err) {
-                node.error(new Error("ca cert read error"));
+                node.error(new Error(`Failed to read CA certificate file: ${err.message}`));
             }
         }
 
         const httpsAgent = new https.Agent(agentConfig);
         const httpAgent = new http.Agent(agentConfig);
 
-        // base fetch config
+        // Base fetch config
+        const timeoutMs = Number(config.timeout ?? "30000");
         let baseConfig = {
-            method: config.method.toUpperCase(),
+            method: (config.method || "GET").toUpperCase(),
             headers: {},
         };
 
-        // request authentication basic
+        // Append basic auth header
         if (endpoint.credentials.username && endpoint.credentials.password) {
             const credentials = Buffer.from(
                 `${endpoint.credentials.username}:${endpoint.credentials.password}`
@@ -60,7 +61,7 @@ module.exports = function (RED) {
             baseConfig.headers.Authorization = `Basic ${credentials}`;
         }
 
-        /* display node metric in node status */
+        // Node metrics
         const metric = {
             execCtr: 0,
             successCtr: 0,
@@ -76,7 +77,6 @@ module.exports = function (RED) {
             });
         }
 
-        // init
         updateStatus({ fill: "green" });
 
         function fetchStart() {
@@ -104,86 +104,79 @@ module.exports = function (RED) {
             });
         }
 
+        function getTypedInput({keyType, keyValue, msg}) {
+            switch (keyType) {
+                case "str":
+                    return keyValue;
+                case "msg":
+                    return msg[keyValue];
+                case "flow":
+                    return node.context().flow.get(keyValue);
+                case "global":
+                    return node.context().global.get(keyValue);
+            }
+        }
+
+        function getElements({list, msg}) {
+            const obj = {};
+            if (!Array.isArray(list)) return obj;
+            list.forEach((el) => {
+                obj[getTypedInput({keyType: el.keyType, keyValue: el.keyValue, msg})] =
+                    getTypedInput({keyType: el.valueType, keyValue: el.valueValue, msg});
+            });
+            return obj;
+        }
+
         node.on("input", async function (msg, send, done) {
+
             const fetchStartedAt = fetchStart();
 
-            function getTypedInput(type, v) {
-                switch (type) {
-                    case "str":
-                        return v;
-                    case "msg":
-                        return msg[v];
-                    case "flow":
-                        return node.context().flow.get(v);
-                    case "global":
-                        return node.context().global.get(v);
-                }
-            }
-
-            function getProperty(arr) {
-                const property = {};
-                if (!Array.isArray(arr)) return property;
-                arr.forEach((el) => {
-                    property[getTypedInput(el.keyType, el.keyValue)] =
-                        getTypedInput(el.valueType, el.valueValue);
-                });
-                return property;
-            }
-
-            // Build URL with base URL
-            let url = new URL(msg.url || config.url, endpoint.config.baseURL).toString();
-            delete msg.url;
-
-            // Build query parameters
-            let queryParams = {};
-            if (baseConfig.method === "GET") {
-                queryParams = msg.params || msg.payload || {};
-            } else {
-                queryParams = msg.params || {};
-            }
-            delete msg.params;
-
-            queryParams = {
-                ...queryParams,
-                ...getProperty(config.params),
-            };
-
-            // Handle API key
-            if(endpoint.credentials.apiKeyValue && endpoint.config.apiKeyKey && endpoint.config.apiKeyAddTo) {
-                let apiKeyValue = "";
-                
-                // Check API key value for mustache syntax
-                const apiKeyMatch = /^{{(global|flow)\.(.+)}}$/.exec(endpoint.credentials.apiKeyValue);
-                if(apiKeyMatch && apiKeyMatch[1] && apiKeyMatch[2]) {
-                    apiKeyValue = node.context()[apiKeyMatch[1]].get(apiKeyMatch[2]);
-                } else {
-                    apiKeyValue = endpoint.credentials.apiKeyValue;
-                }
-
-                // Add API key to request
-                if (endpoint.config.apiKeyAddTo === "headers") {
-                    baseConfig.headers[endpoint.config.apiKeyKey] = apiKeyValue;
-                } else if (endpoint.config.apiKeyAddTo === "params") {
-                    queryParams[endpoint.config.apiKeyKey] = apiKeyValue;
-                }
-            }
-
-            // Append query parameters to URL
-            const urlObj = new URL(url);
-            Object.entries(queryParams).forEach(([key, value]) => {
-                urlObj.searchParams.append(key, value);
-            });
-
             try {
+
+                // Merge base URL path with request URL
+                const urlObj = new URL(endpoint.config.baseURL);
+                const relativeUrl = msg.url || config.url;
+
+                urlObj.pathname = urlObj.pathname.replace(/\/$/, '') + '/' + relativeUrl.replace(/^\//, '');
+                delete msg.url;
+
+                // Build query parameters
+                let queryParams = {};
+                if (baseConfig.method === "GET") {
+                    queryParams = msg.params || msg.payload || {};
+                } else {
+                    queryParams = msg.params || {};
+                }
+                delete msg.params;
+
+                queryParams = {
+                    ...queryParams,
+                    ...getElements({list: config.params, msg}),
+                };
+
+                // Handle API key
+                if (endpoint.credentials.apiKeyValue && endpoint.config.apiKeyKey && endpoint.config.apiKeyAddTo) {
+                    // Add API key to request
+                    if (endpoint.config.apiKeyAddTo === "headers") {
+                        baseConfig.headers[endpoint.config.apiKeyKey] = endpoint.credentials.apiKeyValue;
+                    } else if (endpoint.config.apiKeyAddTo === "params") {
+                        queryParams[endpoint.config.apiKeyKey] = endpoint.credentials.apiKeyValue;
+                    }
+                }
+
+                // Append query parameters to URL
+                Object.entries(queryParams).forEach(([key, value]) => {
+                    urlObj.searchParams.append(key, value);
+                });
                 // Build fetch config
                 const fetchConfig = {
                     ...baseConfig,
                     headers: {
                         ...msg.headers,
-                        ...getProperty(config.headers),
+                        ...getElements({list: config.headers, msg}),
                         ...baseConfig.headers,
                     },
-                    signal: AbortSignal.timeout(config.timeout || 30000),
+                    signal: AbortSignal.timeout(timeoutMs),
                 };
                 delete msg.headers;
 
@@ -217,8 +210,8 @@ module.exports = function (RED) {
                     case "arraybuffer":
                         responseBody = await response.arrayBuffer();
                         break;
-                    
-                    case "json": 
+
+                    case "json":
                     default:
                         const responseText = await response.text();
                         try {
@@ -226,7 +219,7 @@ module.exports = function (RED) {
                         } catch {
                             responseBody = responseText;
                         }
-                        
+
                 }
                 msg.payload = responseBody;
 
@@ -242,9 +235,9 @@ module.exports = function (RED) {
                 }
 
                 const statusFailed = response.status < 200 || response.status >= 300;
-                if(statusFailed) {
+                if (statusFailed) {
                     const validateStatus = config.validateStatus ?? false;
-                    if(validateStatus) {
+                    if (validateStatus) {
                         let errMsg = `HTTP ${response.status}`;
                         if (responseBody !== undefined && responseBody !== null) {
                             if (typeof responseBody === "string") {
@@ -263,7 +256,7 @@ module.exports = function (RED) {
                 } else {
                     fetchSuccess(fetchStartedAt);
                 }
-                    
+
                 send(msg);
                 done();
             } catch (err) {
